@@ -1,0 +1,511 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lab 4: A/B testing and canary promotion</title><style>:root{--bg:#fff;--fg:#1c2330;--mut:#5b6678;--card:#f4f6fa;--bd:#d9dfe9;--acc:#1b5fc7;--code:#0f1724;--cf:#e6edf7}
+@media(prefers-color-scheme:dark){:root{--bg:#10151d;--fg:#e4e9f2;--mut:#9aa6b8;--card:#171e29;--bd:#2a3445;--acc:#6aa5ff;--code:#0a0e14;--cf:#dbe4f2}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,sans-serif}header,main{max-width:58rem;margin:0 auto;padding:1rem 1.25rem}
+h1{margin:.3rem 0}.sub{color:var(--mut)}a{color:var(--acc)}button{font:inherit;font-size:.85rem;border:1px solid var(--bd);background:var(--card);color:var(--fg);border-radius:6px;padding:.3rem .7rem;cursor:pointer}
+details{border:1px solid var(--bd);border-radius:8px;margin:.7rem 0;background:var(--card)}summary{cursor:pointer;font-weight:600;padding:.7rem 1rem}details>*:not(summary){margin:.6rem 1rem}
+pre{position:relative;background:var(--code);color:var(--cf);padding:1rem;border-radius:6px;overflow-x:auto;font-size:.82rem;line-height:1.45}pre button{position:absolute;top:.4rem;right:.4rem}
+code{font-family:ui-monospace,Consolas,monospace}p code{background:var(--bg);padding:.1rem .3rem;border-radius:4px}</style></head><body>
+<header><h1>Lab 4: A/B testing and canary promotion</h1><p class="sub">Docker images, services, a Traefik HTTPRoute traffic split, self-healing and automatic promotion.</p><button onclick="all(true)">Expand all</button> <button onclick="all(false)">Collapse all</button></header><main><details><summary>0. Git repository</summary><pre><code>Create a repo on GitHub named: cse2001lab4
+git clone https://github.com/&lt;username&gt;/cse2001lab4
+cd cse2001lab4
+git branch -M main
+
+# when the files are created:
+git add .
+git commit -m &quot;Initial commit&quot;
+git push -u origin main</code></pre></details><details><summary>1. Project structure</summary><pre><code>cse2001lab4/
+├── README.md
+├── docker/
+│   ├── promotion/  (Dockerfile, promotion_server.py)
+│   ├── v1/         (Dockerfile, app.py, index.html)
+│   └── v2/         (Dockerfile, app.py, index.html)
+└── k8s/
+    ├── namespace.yaml  canary.yaml  role_and_binding.yaml
+    ├── v1-deployment.yaml  v1-service.yaml
+    ├── v2-deployment.yaml  v2-service.yaml
+    └── promotion-deployment.yaml  promotion-server-service.yaml</code></pre></details><details><summary>2. Dockerfiles</summary><p>All images build from <code>python-ci:lab</code>, which is already in the local registry (no internet needed).</p><pre><code># docker/promotion/Dockerfile
+FROM localhost:32000/python-ci:lab
+RUN pip install --no-cache-dir kubernetes
+WORKDIR /app
+COPY promotion_server.py .
+EXPOSE 5000
+CMD [&quot;python&quot;, &quot;promotion_server.py&quot;]</code></pre><pre><code># docker/v1/Dockerfile
+FROM localhost:32000/python-ci:lab
+WORKDIR /app
+RUN pip install --no-cache-dir requests
+COPY app.py .
+COPY index.html .
+EXPOSE 8080
+CMD [&quot;python&quot;, &quot;app.py&quot;]</code></pre><pre><code># docker/v2/Dockerfile
+FROM localhost:32000/python-ci:lab
+WORKDIR /app
+COPY app.py .
+COPY index.html .
+EXPOSE 8080
+CMD [&quot;python&quot;, &quot;app.py&quot;]</code></pre></details><details><summary>2b. Application files</summary><p>Create these files exactly as shown.</p><pre><code># docker/promotion/promotion_server.py
+import os
+import ssl
+import threading
+import urllib3
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from kubernetes import client, config
+
+click_count = 0
+THRESHOLD = 3
+lock = threading.Lock()
+
+NAMESPACE = &quot;dev&quot;
+ROUTE_NAME = &quot;ab-test-route&quot;
+
+
+def initialize_kube_client():
+    try:
+        # Load the in-cluster configuration
+        config.load_incluster_config()
+        configuration = client.Configuration.get_default_copy()
+
+        ca_cert = &#x27;/var/run/secrets/kubernetes.io/serviceaccount/ca.crt&#x27;
+
+        # 1. Create a modern SSL Context for Python 3.14
+        context = ssl.create_default_context(cafile=ca_cert)
+
+        # 2. THE PYTHON 3.14 FIX: Disable &#x27;STRICT&#x27; mode
+        # This allows MicroK8s certificates (which lack KeyUsage extensions)
+        # while still verifying the certificate chain (SSL=True).
+        context.verify_flags &amp;= ~ssl.VERIFY_X509_STRICT
+
+        # 3. Lower security level to allow legacy certificate formats
+        context.set_ciphers(&#x27;DEFAULT@SECLEVEL=1&#x27;)
+
+        # 4. Inject the custom context into the API client&#x27;s connection pool
+        api_client = client.ApiClient(configuration)
+        api_client.rest_client.pool_manager.connection_pool_kw[&#x27;ssl_context&#x27;] = context
+
+        print(&quot;Kubernetes API client initialized with SSL=True (Python 3.14 Fix Applied).&quot;)
+        # CustomObjectsApi is needed to patch Gateway API resources (HTTPRoute)
+        return client.CustomObjectsApi(api_client)
+
+    except Exception as e:
+        print(f&quot;Initial setup failed: {e}&quot;)
+        # Crash early if we can&#x27;t get a secure connection
+        raise
+
+
+api_instance = initialize_kube_client()
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        global click_count
+        message = &quot;&quot;
+
+        if self.path == &quot;/kill&quot;:
+            with lock:
+                click_count += 1
+                count = click_count
+
+            message = f&quot;Click registered ({count}/{THRESHOLD})&quot;
+            print(message, flush=True)
+
+            if count &gt;= THRESHOLD:
+                message += &quot; -&gt; Promotion triggered! v2 now 100%&quot;
+                print(message, flush=True)
+
+                if api_instance:
+                    try:
+                        # JSON Patch: v1 (index 0) weight -&gt; 0, v2 (index 1) weight -&gt; 100
+                        # Indexes match the order of backendRefs in k8s/canary.yaml
+                        body = [
+                            {&quot;op&quot;: &quot;replace&quot;,
+                             &quot;path&quot;: &quot;/spec/rules/0/backendRefs/0/weight&quot;,
+                             &quot;value&quot;: 0},
+                            {&quot;op&quot;: &quot;replace&quot;,
+                             &quot;path&quot;: &quot;/spec/rules/0/backendRefs/1/weight&quot;,
+                             &quot;value&quot;: 100},
+                        ]
+
+                        print(f&quot;Patching HTTPRoute {ROUTE_NAME} in {NAMESPACE}...&quot;, flush=True)
+
+                        api_instance.patch_namespaced_custom_object(
+                            group=&quot;gateway.networking.k8s.io&quot;,
+                            version=&quot;v1&quot;,
+                            namespace=NAMESPACE,
+                            plural=&quot;httproutes&quot;,
+                            name=ROUTE_NAME,
+                            body=body,
+                            _content_type=&quot;application/json-patch+json&quot;,
+                            _request_timeout=5
+                        )
+
+                        message += &quot; HTTPRoute updated successfully.&quot;
+                        print(&quot;HTTPRoute patch applied.&quot;, flush=True)
+
+                    except Exception as e:
+                        message += f&quot; K8s API Error: {e}&quot;
+                        print(f&quot;Exception during patch: {e}&quot;, flush=True)
+                else:
+                    message += &quot; API client unavailable.&quot;
+
+            self.send_response(200)
+            self.send_header(&quot;Content-type&quot;, &quot;text/plain&quot;)
+            self.end_headers()
+            self.wfile.write(message.encode())
+
+        elif self.path == &quot;/health&quot;:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b&quot;OK&quot;)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+if __name__ == &quot;__main__&quot;:
+    print(&quot;Starting Promotion Server...&quot;, flush=True)
+    server = ThreadingHTTPServer((&quot;0.0.0.0&quot;, 5000), Handler)
+    print(&quot;Promotion server running on port 5000&quot;, flush=True)
+    server.serve_forever()</code></pre><pre><code># docker/v1/app.py
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
+import requests  # Importing the requests module to make HTTP calls
+
+# URL of the promotion server (adjust as needed)
+PROMOTION_SERVER_URL = &quot;http://promotion-server:5000/kill&quot;
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == &quot;/&quot;:
+            self.send_response(200)
+            self.send_header(&quot;Content-type&quot;, &quot;text/html&quot;)
+            self.end_headers()
+            with open(&quot;index.html&quot;, &quot;rb&quot;) as f:
+                self.wfile.write(f.read())
+
+        elif self.path == &quot;/kill&quot;:
+            # Log when /kill is hit
+            print(&quot;Received /kill request, calling promotion server...&quot;, flush=True)
+
+            # Send a valid HTTP response first, then crash
+            self.send_response(200)
+            self.send_header(&quot;Content-type&quot;, &quot;text/plain&quot;)
+            self.end_headers()
+
+            try:
+                response = requests.get(PROMOTION_SERVER_URL, timeout=3)
+                if response.status_code == 200:
+                    print(&quot;Promotion server count updated!&quot;, flush=True)
+                    self.wfile.write(b&quot;Promotion server count updated! &quot;)
+                else:
+                    print(f&quot;Failed to update promotion server count. Status code: {response.status_code}&quot;, flush=True)
+                    self.wfile.write(b&quot;Failed to update promotion server count. &quot;)
+            except Exception as e:
+                print(f&quot;Error calling promotion server: {e}&quot;, flush=True)
+                self.wfile.write(b&quot;Error calling promotion server. &quot;)
+
+            # Simulate crash
+            self.wfile.write(b&quot;Crashing pod...&quot;)
+            self.wfile.flush()
+            os._exit(1)
+
+        elif self.path == &quot;/health&quot;:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b&quot;OK&quot;)
+
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+if __name__ == &quot;__main__&quot;:
+    server = ThreadingHTTPServer((&quot;0.0.0.0&quot;, 8080), Handler)
+    print(&quot;Self-healing server v1 running on port 8080&quot;, flush=True)
+    server.serve_forever()</code></pre><pre><code>&lt;!-- docker/v1/index.html --&gt;
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Python App V1&lt;/title&gt;
+&lt;/head&gt;
+&lt;body style=&quot;background-color: lightcoral;&quot;&gt;
+  &lt;h1&gt;La Trobe University - Computer Science and Information Technology: Python App Version 1&lt;/h1&gt;
+  &lt;button onclick=&quot;fetch(&#x27;/kill&#x27;)&quot;&gt;Trigger Bug&lt;/button&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre><pre><code># docker/v2/app.py
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == &quot;/&quot;:
+            self.send_response(200)
+            self.send_header(&quot;Content-type&quot;, &quot;text/html&quot;)
+            self.end_headers()
+            with open(&quot;index.html&quot;, &quot;rb&quot;) as f:
+                self.wfile.write(f.read())
+        elif self.path == &quot;/health&quot;:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b&quot;OK&quot;)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+if __name__ == &quot;__main__&quot;:
+    server = HTTPServer((&quot;0.0.0.0&quot;, 8080), Handler)
+    print(&quot;Bug-free server v2 running on port 8080&quot;)
+    server.serve_forever()</code></pre><pre><code>&lt;!-- docker/v2/index.html --&gt;
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Python App V2&lt;/title&gt;
+&lt;/head&gt;
+&lt;body style=&quot;background-color: lightblue;&quot;&gt;
+  &lt;h1&gt;La Trobe University - Computer Science and Information Technology: Python App Version 2&lt;/h1&gt;
+  &lt;button onclick=&quot;alert(&#x27;Bug Free!!&#x27;)&quot;&gt;Check Bug Status&lt;/button&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre></details><details><summary>3. Build and push images</summary><pre><code>DOCKER_BUILDKIT=1 sudo docker build --no-cache -t localhost:32000/python-ab:v1 ./docker/v1
+sudo docker push localhost:32000/python-ab:v1
+
+DOCKER_BUILDKIT=1 sudo docker build --no-cache -t localhost:32000/python-ab:v2 ./docker/v2
+sudo docker push localhost:32000/python-ab:v2
+
+DOCKER_BUILDKIT=1 sudo docker build --no-cache -t localhost:32000/python-promo:latest ./docker/promotion
+sudo docker push localhost:32000/python-promo:latest</code></pre><p>Check the registry:</p><pre><code>curl -s http://localhost:32000/v2/_catalog
+curl -s http://localhost:32000/v2/python-ab/tags/list
+curl -s http://localhost:32000/v2/python-promo/tags/list</code></pre></details><details><summary>4. Kubernetes manifests</summary><pre><code># k8s/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    purpose: advanced-lab
+    owner: dev-team</code></pre><pre><code># k8s/canary.yaml  (Traefik Gateway API: 70% v1 / 30% v2)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ab-test-route
+  namespace: dev
+spec:
+  parentRefs:
+  - name: traefik-gateway
+    namespace: ingress
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: nginx-a
+      port: 80
+      weight: 70
+    - name: nginx-b
+      port: 80
+      weight: 30</code></pre><pre><code># k8s/role_and_binding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: dev
+  name: ingress-updater
+rules:
+  - apiGroups: [&quot;gateway.networking.k8s.io&quot;]
+    resources: [&quot;httproutes&quot;]
+    verbs: [&quot;patch&quot;]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ingress-updater-binding
+  namespace: dev
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: dev
+roleRef:
+  kind: Role
+  name: ingress-updater
+  apiGroup: rbac.authorization.k8s.io</code></pre><pre><code># k8s/v1-service.yaml   (v2-service.yaml: name nginx-b, labels version: v2, demo: canary)
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-a
+  namespace: dev
+  labels: {app: python-app, version: v1, demo: self-healing}
+spec:
+  selector: {app: python-app, version: v1}
+  ports:
+    - {protocol: TCP, port: 80, targetPort: 8080}</code></pre><pre><code># k8s/promotion-server-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: promotion-server
+  namespace: dev
+spec:
+  selector: {app: promotion}
+  ports:
+    - {protocol: TCP, port: 5000, targetPort: 5000, nodePort: 30000}
+  type: NodePort</code></pre><pre><code># k8s/promotion-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: promotion-server
+  namespace: dev
+  labels:
+    app: promotion
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: promotion
+  template:
+    metadata:
+      labels:
+        app: promotion
+    spec:
+      containers:
+        - name: promotion-server
+          image: localhost:32000/python-promo:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000</code></pre><pre><code># k8s/v1-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-app-v1
+  namespace: dev
+  labels:
+    app: python-app
+    version: v1
+    demo: self-healing
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: python-app
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: python-app
+        version: v1
+        demo: self-healing
+    spec:
+      containers:
+        - name: python-app
+          image: localhost:32000/python-ab:v1
+          imagePullPolicy: Always  # Forces Kubernetes to pull the image on each pod restart
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 1
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 1</code></pre><pre><code># k8s/v2-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-app-v2
+  namespace: dev
+  labels:
+    app: python-app
+    version: v2
+    demo: canary
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: python-app
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: python-app
+        version: v2
+        demo: canary
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+      - name: python-app
+        image: localhost:32000/python-ab:v2
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 1</code></pre><pre><code># k8s/v2-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-b
+  namespace: dev
+  labels:
+    app: python-app
+    version: v2
+    demo: canary
+spec:
+  selector:
+    app: python-app
+    version: v2
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080</code></pre></details><details><summary>5. Apply the resources</summary><pre><code>sudo microk8s kubectl apply -f k8s/namespace.yaml
+sudo microk8s kubectl apply -f k8s/role_and_binding.yaml
+sudo microk8s kubectl apply -f k8s/v1-deployment.yaml
+sudo microk8s kubectl apply -f k8s/v1-service.yaml
+sudo microk8s kubectl apply -f k8s/v2-deployment.yaml
+sudo microk8s kubectl apply -f k8s/v2-service.yaml
+sudo microk8s kubectl apply -f k8s/promotion-deployment.yaml
+sudo microk8s kubectl apply -f k8s/promotion-server-service.yaml
+sudo microk8s kubectl apply -f k8s/canary.yaml   # the weighted HTTPRoute
+
+sudo microk8s kubectl get pods -n dev
+sudo microk8s kubectl get svc -n dev
+sudo microk8s kubectl get httproute -n dev</code></pre><p>Repeat <code>get pods -n dev</code> for about a minute until every pod is Running.</p></details><details><summary>6. Test the lab</summary><p>Open <b>http://127.0.0.1:8081</b> on your computer (bridged network: <code>http://&lt;VM IP&gt;</code>). Refresh many times: about 70% v1, 30% v2.</p><pre><code>1. Click &quot;Trigger Bug&quot; on v1 -&gt; the pod crashes and Kubernetes restarts it
+   (watch: sudo microk8s kubectl get pods -n dev).
+2. Each click also increments the promotion server counter.
+3. After 3 clicks the HTTPRoute is patched -&gt; 100% of traffic goes to v2.
+4. v2 shows the &quot;Bug Free!!&quot; button.
+
+Run it again: reapply the route and reset the counter
+   sudo microk8s kubectl apply -f k8s/canary.yaml
+   sudo microk8s kubectl delete pods --all -n dev</code></pre><pre><code># from inside the VM
+for i in {1..20}; do
+  echo &quot;Attempt $i:&quot;
+  version=$(curl -s http://127.0.0.1 | grep -o &quot;Version [12]&quot;)
+  echo &quot;Responded with: $version&quot;
+  sleep 1
+done</code></pre></details><details><summary>7. Debug</summary><pre><code># Change something in the index file? Delete the namespace and start again
+sudo microk8s kubectl delete namespace dev
+sudo microk8s kubectl apply -f k8s/namespace.yaml
+
+sudo microk8s.ctr images ls
+sudo microk8s.ctr images rm localhost:32000/python-ab:v1
+sudo microk8s.ctr images rm localhost:32000/python-ab:v2
+sudo microk8s.ctr images rm localhost:32000/python-promo:latest
+
+sudo microk8s kubectl delete pods --all -n dev
+sudo microk8s kubectl get pods -n dev
+sudo microk8s kubectl logs &lt;promotion-server-pod-name&gt; -n dev</code></pre><p>Page not loading? Lab 4 uses port 8081 (Traefik), not 8080 (Lab 3). Inside the VM run <code>curl -s http://127.0.0.1 | grep -o "Version [12]"</code>. Any reply means Traefik works; if it prints nothing, the problem is in the cluster, not the NAT rule.</p></details><details><summary>8. End of lab</summary><pre><code># Wipes everything in the &#x27;dev&#x27; namespace (including the HTTPRoute)
+sudo microk8s kubectl delete namespace dev</code></pre></details></main><script>document.querySelectorAll('pre').forEach(function(p){var b=document.createElement('button');b.textContent='Copy';b.onclick=function(){navigator.clipboard.writeText(p.innerText.replace(/Copy$/,'').trimEnd());b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)};p.appendChild(b)});
+function all(o){document.querySelectorAll('details').forEach(function(d){d.open=o})}</script></body></html>
