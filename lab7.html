@@ -1,0 +1,114 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lab 7: DevSecOps observability</title><style>:root{--bg:#fff;--fg:#1c2330;--mut:#5b6678;--card:#f4f6fa;--bd:#d9dfe9;--acc:#1b5fc7;--code:#0f1724;--cf:#e6edf7}
+@media(prefers-color-scheme:dark){:root{--bg:#10151d;--fg:#e4e9f2;--mut:#9aa6b8;--card:#171e29;--bd:#2a3445;--acc:#6aa5ff;--code:#0a0e14;--cf:#dbe4f2}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,sans-serif}header,main{max-width:58rem;margin:0 auto;padding:1rem 1.25rem}
+h1{margin:.3rem 0}.sub{color:var(--mut)}a{color:var(--acc)}button{font:inherit;font-size:.85rem;border:1px solid var(--bd);background:var(--card);color:var(--fg);border-radius:6px;padding:.3rem .7rem;cursor:pointer}
+details{border:1px solid var(--bd);border-radius:8px;margin:.7rem 0;background:var(--card)}summary{cursor:pointer;font-weight:600;padding:.7rem 1rem}details>*:not(summary){margin:.6rem 1rem}
+pre{position:relative;background:var(--code);color:var(--cf);padding:1rem;border-radius:6px;overflow-x:auto;font-size:.82rem;line-height:1.45}pre button{position:absolute;top:.4rem;right:.4rem}
+code{font-family:ui-monospace,Consolas,monospace}p code{background:var(--bg);padding:.1rem .3rem;border-radius:4px}</style></head><body>
+<header><h1>Lab 7: DevSecOps observability</h1><p class="sub">Prometheus, Loki, Alloy, Grafana and Jenkins in one namespace, with chaos pods to trigger alerts.</p><button onclick="all(true)">Expand all</button> <button onclick="all(false)">Collapse all</button></header><main><details><summary>0. Git repository</summary><pre><code>Create a repo on GitHub named: cse2001lab7
+git clone https://github.com/&lt;username&gt;/cse2001lab7
+cd cse2001lab7
+git branch -M main
+git add .
+git commit -m &quot;Initial commit&quot;
+git push -u origin main</code></pre></details><details><summary>1. Architecture</summary><pre><code>Git repo (Jenkinsfile)
+       |
+Jenkins pipeline ---&gt; demo-app pod
+       |
+Prometheus &lt;--- metrics        Alloy &lt;--- logs
+       |                          |
+   Grafana  &lt;-------------------- Loki
+(pipeline + app metrics + logs)</code></pre></details><details><summary>2. Project directory</summary><pre><code>Jenkinsfile   Readme.md
+k8s/         namespace, jenkins-sa, jenkins-rbac, jenkins-deployment,
+             jenkins-service, jenkins-pvc, jenkins-ca-configmap
+demo-app/    demo-app-configmap, deployment, service
+prometheus/  prometheus-config, prometheus-alert-rules, prometheus-deployment, prometheus-service
+grafana/     grafana-deployment, grafana-service, grafana-datasources-configmap
+logging/     loki-config/-deployment/-service, alloy-config/-service/-sa/-rbac/-daemonset
+chaos/       chaos-pods.yaml</code></pre></details><details><summary>3. New file: k8s/jenkins-rbac.yaml</summary><p>Lets the <code>jenkins</code> service account start agent pods in the <code>observability</code> namespace.</p><pre><code>apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: jenkins, namespace: observability}
+rules:
+  - apiGroups: [&quot;&quot;]
+    resources: [pods, pods/exec, pods/log, services, endpoints, configmaps, secrets, persistentvolumeclaims]
+    verbs: [get, list, watch, create, delete, patch, update]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch, create, delete, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: jenkins, namespace: observability}
+subjects: [{kind: ServiceAccount, name: jenkins, namespace: observability}]
+roleRef: {kind: Role, name: jenkins, apiGroup: rbac.authorization.k8s.io}</code></pre><p>Alloy regex (in <code>logging/alloy-config.yaml</code>), with the group names kept:</p><pre><code>expression = &quot;/var/log/containers/(?P&lt;pod&gt;[^_]+)_(?P&lt;namespace&gt;[^_]+)_(?P&lt;container&gt;.+)-[0-9a-f]{64}[.]log&quot;
+# alloy-daemonset.yaml args also include:
+#   - --server.http.listen-addr=0.0.0.0:12345
+# demo-app/deployment.yaml exporter image: localhost:32000/nginx-exporter:lab</code></pre></details><details><summary>4. Apply the manifests</summary><pre><code>sudo microk8s kubectl apply -f k8s/namespace.yaml
+sudo microk8s kubectl apply -f k8s/jenkins-sa.yaml
+sudo microk8s kubectl apply -f k8s/jenkins-rbac.yaml
+sudo microk8s kubectl apply -f k8s/jenkins-pvc.yaml
+sudo microk8s kubectl apply -f k8s/jenkins-ca-configmap.yaml
+
+# Loki before Alloy: Alloy needs somewhere to push
+sudo microk8s kubectl apply -f logging/loki-config.yaml
+sudo microk8s kubectl apply -f logging/loki-deployment.yaml
+sudo microk8s kubectl apply -f logging/loki-service.yaml
+sudo microk8s kubectl apply -f logging/alloy-sa.yaml
+sudo microk8s kubectl apply -f logging/alloy-rbac.yaml
+sudo microk8s kubectl apply -f logging/alloy-service.yaml
+sudo microk8s kubectl apply -f logging/alloy-config.yaml
+sudo microk8s kubectl apply -f logging/alloy-daemonset.yaml
+
+sudo microk8s kubectl apply -f prometheus/
+sudo microk8s kubectl apply -f grafana/
+sudo microk8s kubectl apply -f demo-app/
+sudo microk8s kubectl apply -f k8s/jenkins-deployment.yaml
+sudo microk8s kubectl apply -f k8s/jenkins-service.yaml
+
+# optional, when ready to trigger alerts:
+# sudo microk8s kubectl apply -f chaos/chaos-pods.yaml</code></pre></details><details><summary>5. Verify</summary><pre><code>sudo microk8s kubectl get pods -n observability
+sudo microk8s kubectl logs deploy/loki -n observability | grep &quot;started&quot;
+sudo microk8s kubectl logs daemonset/alloy -n observability | grep &quot;loki&quot;
+sudo microk8s kubectl logs deploy/demo-app -n observability -f</code></pre><pre><code>Open on your computer:
+  Demo app    http://127.0.0.1:30080/
+  Prometheus  http://127.0.0.1:30334   (all targets should be UP)
+  Grafana     http://127.0.0.1:30300/  (admin / admin)
+
+Grafana -&gt; Explore -&gt; Loki (one query per pod):
+  count_over_time({namespace=&quot;observability&quot;, pod=~&quot;demo-app-.*&quot;} |= &quot; 200 &quot;[1m])
+  count_over_time({namespace=&quot;observability&quot;, pod=~&quot;demo-app-.*&quot;} |= &quot; 404 &quot;[1m])</code></pre><p>Dashboard: Grafana &rarr; Dashboards &rarr; Import &rarr; Upload JSON (use the dashboard JSON file from the lab repo).</p></details><details><summary>6. Jenkins</summary><pre><code>sudo microk8s kubectl get svc jenkins -n observability
+# NAT: open http://127.0.0.1:32043 on your computer (bridged: http://&lt;VM_IP&gt;:32043)
+
+sudo microk8s kubectl get pods -n observability
+sudo microk8s kubectl exec -it deploy/jenkins -n observability -- cat /var/jenkins_home/secrets/initialAdminPassword
+# Username: admin   Password: &lt;the value printed above&gt;
+
+# Check the volume is Bound (keeps jobs and passwords across restarts)
+sudo microk8s kubectl get pvc -n observability</code></pre><p>On first run Jenkins may say it appears to be offline: click <b>Skip plugin installations</b> (the plugins are already installed).</p><pre><code># Jenkins will not load?
+sudo startJenkinsLabDHCPcerts      # bridged networks: the VM&#x27;s IP changed
+# Last resort:
+sudo microk8s refresh-certs --cert server.crt
+sudo microk8s stop
+sudo microk8s start</code></pre></details><details><summary>7. Jenkins settings and pipeline</summary><pre><code>Manage Jenkins -&gt; Plugins -&gt; Installed plugins:  Kubernetes, Git, GitHub (already installed)
+
+Manage Jenkins -&gt; System
+  Jenkins URL: http://jenkins.observability.svc.cluster.local:8080/
+
+Manage Jenkins -&gt; Clouds -&gt; New cloud -&gt; Kubernetes
+  Name:                  KubernetesCloud
+  Kubernetes URL:        https://kubernetes.default.svc
+  Jenkins URL:           http://jenkins.observability.svc.cluster.local:8080
+  Disable https certificate check: tick
+  Pod template:          pipelinepod
+    Container:           jnlp
+    Docker image:        localhost:32000/jenkins-inbound-agent:lab
+    Working directory:   /home/jenkins/agent
+    Pod service account: jenkins
+
+New Item -&gt; jenkins-pipeline -&gt; Pipeline
+  Definition: Pipeline script from SCM   SCM: Git
+  Repository URL: https://github.com/&lt;username&gt;/cse2001lab7
+  Branch: */main   Script Path: Jenkinsfile   [x] Lightweight checkout
+  Save, then Build Now</code></pre></details><details><summary>8. End of lab</summary><pre><code>sudo microk8s kubectl delete -f chaos/chaos-pods.yaml
+sudo microk8s kubectl delete namespace observability</code></pre></details></main><script>document.querySelectorAll('pre').forEach(function(p){var b=document.createElement('button');b.textContent='Copy';b.onclick=function(){navigator.clipboard.writeText(p.innerText.replace(/Copy$/,'').trimEnd());b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)};p.appendChild(b)});
+function all(o){document.querySelectorAll('details').forEach(function(d){d.open=o})}</script></body></html>
