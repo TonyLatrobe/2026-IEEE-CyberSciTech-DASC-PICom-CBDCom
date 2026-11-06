@@ -1,35 +1,169 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lab 7: DevSecOps observability</title><style>:root{--bg:#fff;--fg:#1c2330;--mut:#5b6678;--card:#f4f6fa;--bd:#d9dfe9;--acc:#1b5fc7;--code:#0f1724;--cf:#e6edf7}
-@media(prefers-color-scheme:dark){:root{--bg:#10151d;--fg:#e4e9f2;--mut:#9aa6b8;--card:#171e29;--bd:#2a3445;--acc:#6aa5ff;--code:#0a0e14;--cf:#dbe4f2}}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,sans-serif}header,main{max-width:58rem;margin:0 auto;padding:1rem 1.25rem}
-h1{margin:.3rem 0}.sub{color:var(--mut)}a{color:var(--acc)}button{font:inherit;font-size:.85rem;border:1px solid var(--bd);background:var(--card);color:var(--fg);border-radius:6px;padding:.3rem .7rem;cursor:pointer}
-details{border:1px solid var(--bd);border-radius:8px;margin:.7rem 0;background:var(--card)}summary{cursor:pointer;font-weight:600;padding:.7rem 1rem}details>*:not(summary){margin:.6rem 1rem}
-pre{position:relative;background:var(--code);color:var(--cf);padding:1rem;border-radius:6px;overflow-x:auto;font-size:.82rem;line-height:1.45}pre button{position:absolute;top:.4rem;right:.4rem}
-code{font-family:ui-monospace,Consolas,monospace}p code{background:var(--bg);padding:.1rem .3rem;border-radius:4px}</style></head><body>
-<header><h1>Lab 7: DevSecOps observability</h1><p class="sub">Prometheus, Loki, Alloy, Grafana and Jenkins in one namespace, with chaos pods to trigger alerts.</p><button onclick="all(true)">Expand all</button> <button onclick="all(false)">Collapse all</button></header><main><details><summary>0. Git repository</summary><pre><code>Create a repo on GitHub named: cse2001lab7
-git clone https://github.com/&lt;username&gt;/cse2001lab7
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevSecOps Observability Lab</title>
+  <style>
+    body { max-width: 1000px; margin: 2rem auto; padding: 0 1rem; font-family: Arial, sans-serif; line-height: 1.55; }
+    pre { overflow-x: auto; padding: 1rem; background: #f4f4f4; border-radius: 4px; }
+    code { font-family: Consolas, "Courier New", monospace; }
+    details { margin: 0.75rem 0; }
+    summary { cursor: pointer; font-weight: 700; }
+  </style>
+</head>
+<body>
+<h3>DevSecOps Observability Lab</h3>
+<p><strong>Architecture</strong></p>
+<ul>
+  <li>
+    <p>One Prometheus scrapes <strong>infrastructure + app metrics</strong></p>
+  </li>
+  <li>
+    <p>Alloy collects <strong>pipeline + app logs</strong></p>
+  </li>
+  <li>
+    <p>Loki stores <strong>logs from both</strong></p>
+  </li>
+  <li>
+    <p>Grafana dashboards visualize <strong>all metrics</strong></p>
+  </li>
+  <li>
+    <p>Chaos scenarios <strong>to trigger alerts<br></strong></p>
+  </li>
+</ul>
+<p><strong>Watch and Repeat the Video:</strong></p>
+<p><strong><a
+      href="https://lms.latrobe.edu.au/filter/echo360tiny/lti_launch.php?url=https%3A%2F%2Fecho360.net.au%2Flti%2F42f2e32c-7e94-41b4-8a5a-ad1681c4e1ca%3FmediaId%3D27c2cc83-e8ce-4ee5-acd2-beeaebfca7d9%26autoplay%3Dfalse%26automute%3Dfalse&amp;cmid=11922340&amp;width=640&amp;height=420"
+      target="_blank" rel="noopener">lab7.mp4</a> </strong></p>
+<details>
+  <summary>0️⃣ Git Repository</summary>
+  <pre><code>Create a Repo on GitHub named: cse2001lab7
+git clone https://url_of_repo
 cd cse2001lab7
+
+git init
 git branch -M main
+
+# When finishing creating the files - commit.
 git add .
-git commit -m &quot;Initial commit&quot;
-git push -u origin main</code></pre></details><details><summary>1. Architecture</summary><pre><code>Git repo (Jenkinsfile)
-       |
-Jenkins pipeline ---&gt; demo-app pod
-       |
-Prometheus &lt;--- metrics        Alloy &lt;--- logs
-       |                          |
-   Grafana  &lt;-------------------- Loki
-(pipeline + app metrics + logs)</code></pre></details><details><summary>2. Project directory</summary><pre><code>Jenkinsfile   Readme.md
-k8s/         namespace, jenkins-sa, jenkins-rbac, jenkins-deployment,
-             jenkins-service, jenkins-pvc, jenkins-ca-configmap
-demo-app/    demo-app-configmap, deployment, service
-prometheus/  prometheus-config, prometheus-alert-rules, prometheus-deployment, prometheus-service
-grafana/     grafana-deployment, grafana-service, grafana-datasources-configmap
-logging/     loki-config/-deployment/-service, alloy-config/-service/-sa/-rbac/-daemonset
-chaos/       chaos-pods.yaml</code></pre></details><details><summary>3. New file: k8s/jenkins-rbac.yaml</summary><p>Lets the <code>jenkins</code> service account start agent pods in the <code>observability</code> namespace.</p><pre><code>apiVersion: rbac.authorization.k8s.io/v1
+git commit -m "Initial commit"
+git push -u origin main
+</code></pre>
+</details>
+<details>
+  <summary>1️⃣ Architecture</summary>
+  <pre><code>Git repo (Jenkinsfile)
+       │
+       ▼
+Jenkins pipeline -----&gt; kubectl apply demo-app ---&gt; demo-app pod
+       │                                    \
+       │                                     \
+Prometheus &lt;----- metrics         Alloy &lt;---- logs
+       │                                     \
+       ▼                                      \
+Alertmanager                                 Loki
+       │                                       │
+       ▼                                       ▼
+   Grafana dashboard (pipeline + app metrics + logs)
+</code></pre>
+</details>
+<details>
+  <summary>2️⃣ Project Directory</summary>
+  <pre><code>
+├── Jenkinsfile
+├── Readme.md
+├── k8s/
+│   ├── namespace.yaml
+│   ├── jenkins-sa.yaml
+│   ├── jenkins-rbac.yaml
+│   ├── jenkins-deployment.yaml
+│   ├── jenkins-service.yaml
+│   ├── jenkins-pvc.yaml   
+│   └── jenkins-ca-configmap.yaml
+├── alertmanager/
+│   └── alertmanager-config.yaml
+│   
+├── demo-app/
+│   ├── demo-app-configmap.yaml
+│   ├── deployment.yaml
+│   └── service.yaml
+├── prometheus/
+│   ├── prometheus-config.yaml
+│   ├── prometheus-alert-rules.yaml
+│   ├── prometheus-deployment.yaml
+│   └── prometheus-service.yaml
+├── grafana/
+│   ├── grafana-deployment.yaml
+│   ├── grafana-service.yaml
+│   └── grafana-datasources-configmap.yaml
+├── logging/
+│   ├── loki-config.yaml
+│   ├── loki-deployment.yaml
+│   ├── loki-service.yaml
+│   ├── alloy-config.yaml
+│   ├── alloy-service.yaml
+│   ├── alloy-sa.yaml
+│   ├── alloy-rbac.yaml
+│   └── alloy-daemonset.yaml
+└── chaos/
+    └── chaos-pods.yaml
+</code></pre>
+</details>
+<details>
+  <summary>3️⃣ Jenkinsfile</summary>
+  <pre><code>
+pipeline {
+    agent any // This ensures a node/executor is allocated
+    stages {
+        stage('Build') {
+            steps {
+                script {
+                    try {
+                        // All 'sh' steps must happen inside an agent/node context. This will always fail without a makefile
+                        sh 'make build'
+                    } catch (err) {
+                        // The 'node' context is still active here, so this 'sh' works
+                        def lokiUrl = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+                        def timestamp = System.currentTimeMillis() * 1000000
+                        
+                        sh """
+                        curl -X POST -H "Content-Type: application/json" \
+                        -d '{"streams": [{"stream": {"job": "jenkins-pipeline"}, "values": [["${timestamp}", "Build Failed: ${err}"]]}]}' \
+                        ${lokiUrl}
+                        """
+                        error("Build failed: ${err}")
+                    }
+                }
+            }
+        }
+    }
+}
+</code></pre>
+</details>
+<details>
+  <summary>4️⃣ Kubernetes Manifests</summary>
+  <h3>k8s/namespace.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+# All observability components and monitored apps will live here
+</code></pre>
+  <h3>k8s/jenkins-sa.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins
+  namespace: observability
+</code></pre>
+  <h3>k8s/jenkins-rbac.yaml</h3>
+  <pre><code>
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata: {name: jenkins, namespace: observability}
 rules:
-  - apiGroups: [&quot;&quot;]
+  - apiGroups: [""]
     resources: [pods, pods/exec, pods/log, services, endpoints, configmaps, secrets, persistentvolumeclaims]
     verbs: [get, list, watch, create, delete, patch, update]
   - apiGroups: [apps]
@@ -40,16 +174,862 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata: {name: jenkins, namespace: observability}
 subjects: [{kind: ServiceAccount, name: jenkins, namespace: observability}]
-roleRef: {kind: Role, name: jenkins, apiGroup: rbac.authorization.k8s.io}</code></pre><p>Alloy regex (in <code>logging/alloy-config.yaml</code>), with the group names kept:</p><pre><code>expression = &quot;/var/log/containers/(?P&lt;pod&gt;[^_]+)_(?P&lt;namespace&gt;[^_]+)_(?P&lt;container&gt;.+)-[0-9a-f]{64}[.]log&quot;
-# alloy-daemonset.yaml args also include:
-#   - --server.http.listen-addr=0.0.0.0:12345
-# demo-app/deployment.yaml exporter image: localhost:32000/nginx-exporter:lab</code></pre></details><details><summary>4. Apply the manifests</summary><pre><code>sudo microk8s kubectl apply -f k8s/namespace.yaml
+roleRef: {kind: Role, name: jenkins, apiGroup: rbac.authorization.k8s.io}
+</code></pre>
+  <h3>k8s/jenkins-deployment.yaml</h3>
+  <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      serviceAccountName: jenkins
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: jenkins
+          image: localhost:32000/jenkins-secops:lab
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: jenkins-data
+              mountPath: /var/jenkins_home
+            - name: k8s-ca
+              mountPath: /var/run/secrets/kubernetes.io/ca
+              readOnly: true
+      volumes:
+        - name: jenkins-data
+          persistentVolumeClaim:
+            claimName: jenkins-pvc
+        - name: k8s-ca
+          configMap:
+            name: jenkins-ca-cert
+</code></pre>
+  <h3>k8s/jenkins-service.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+  namespace: observability
+spec:
+  selector:
+    app: jenkins
+  type: NodePort
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 32043
+    - name: jnlp
+      port: 50000
+      targetPort: 50000
+      nodePort: 32044
+</code></pre>
+  <h3>k8s/jenkins-pvc.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-pvc
+  namespace: observability
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+</code></pre>
+  <h3>k8s/jenkins-ca-configmap.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jenkins-ca-cert
+  namespace: observability
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIDDzCCAfegAwIBAgIUEN4xrO7kt7o0Gsjq9+S0fyy5gFIwDQYJKoZIhvcNAQEL
+    BQAwFzEVMBMGA1UEAwwMMTAuMTUyLjE4My4xMB4XDTI2MDExNzAxMzg1OVoXDTM2
+    MDExNTAxMzg1OVowFzEVMBMGA1UEAwwMMTAuMTUyLjE4My4xMIIBIjANBgkqhkiG
+    9w0BAQEFAAOCAQ8AMIIBCgKCAQEA10va+cuiOgCI1z4Jn6SKv1CLz0FR9ITy11nB
+    cST5YkLyj4x5FdCpBRtrgnHels3FhZRH9QF3j9WTfz7CETZ+sEmKw0lNgyckvik4
+    udQVaaX/C0+k3rC7i1kGLc7lddP0v7ueh4I7Qyz0RQbj5WvxDcuy6WwkM+niKvNG
+    PCU6lyigjcG2r35lYtLbQbfPp8mgaut83tGc1Rbv+jvPulGGwt2oYpmunyl/BbnT
+    B+L16LqzOi+ZnEnMPwFkrGbrvgFEq4do5V/YamRd79y/RUvZenzs5p2ztqpYugZi
+    MuxfdOfQNZP4ZNO0GogTGqbCVtBBvslLEGNZocsbGyIduIzkiwIDAQABo1MwUTAd
+    BgNVHQ4EFgQUzUTb6NaiD7Jq8XTcdBsS1ZrhogwwHwYDVR0jBBgwFoAUzUTb6Nai
+    D7Jq8XTcdBsS1ZrhogwwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+    AQEAhhgKNTAFHqcP+3KpbqJMNYKYC2/AKwyEe6ZMkxYAIFCiEOO6wr/CCGTtCC2B
+    yYTCMIIRH281S3IiaZszDkSlbpDF+s7rX/8n9gt98WfkW2h8rhA+P0/bLdRmzyi+
+    TPoDk/jNX6R853Fh5v7pgeAzPBWnyhp1i9NHD+iMht+VZfeNpkF49eOZ55wA0r2C
+    q1uwOw8zEhD3kLMSTD3lfWErkt9WWr4RVElfNsu+RGDWpu8hgpVHfEKlTYDBOBz3
+    9RYjclVqlUqztWqt7NlE95yiqiZBpzb1XIcBoLEhLbWeasINMCR9zGxr+qHObwxT
+    xZGuWqfyseDaqzwoi+nY0ndrLQ==
+    -----END CERTIFICATE-----
+</code></pre>
+  <h3>demo-app/deployment.yaml</h3>
+  <pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: observability
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+    spec:
+      containers:
+        - name: demo-app
+          image: localhost:32000/nginx:stable
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: demo-app-html
+              mountPath: /usr/share/nginx/html
+            - name: demo-app-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+
+        - name: nginx-exporter
+          image: localhost:32000/nginx-exporter:lab
+          args:
+            - -nginx.scrape-uri=http://localhost/nginx_status
+          ports:
+            - containerPort: 9113
+
+      volumes:
+        - name: demo-app-html
+          configMap:
+            name: demo-app-html
+            items:
+              - key: index.html
+                path: index.html
+
+        - name: demo-app-conf
+          configMap:
+            name: demo-app-html
+            items:
+              - key: default.conf
+                path: default.conf
+</code></pre>
+  <h3>demo-app/service.yaml</h3>
+  <pre><code>
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app
+  namespace: observability
+spec:
+  type: NodePort
+  selector:
+    app: demo-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+
+    - name: metrics
+      port: 9113
+      targetPort: 9113
+    
+</code></pre>
+  <h3>demo-app/demo-app-configmap.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-app-html
+  namespace: observability
+data:
+  index.html: |
+    &lt;!DOCTYPE html&gt;
+    &lt;html lang="en"&gt;
+    &lt;head&gt;
+        &lt;meta charset="UTF-8"&gt;
+        &lt;meta name="viewport" content="width=device-width, initial-scale=1.0"&gt;
+        &lt;title&gt;Demo App — Observability Lab&lt;/title&gt;
+        &lt;style&gt;
+          body { font-family: monospace; padding: 2rem; background: #111; color: #0f0; }
+          #log { margin-top: 1rem; font-size: 0.85rem; max-height: 300px; overflow-y: auto; }
+          .ok  { color: #0f0; }
+          .err { color: #f44; }
+        &lt;/style&gt;
+    &lt;/head&gt;
+    &lt;body&gt;
+        &lt;h2&gt;Demo App — Observability Lab&lt;/h2&gt;
+        &lt;p&gt;Generating traffic every &lt;strong&gt;5s&lt;/strong&gt;. Watch Loki + Prometheus.&lt;/p&gt;
+        &lt;div id="log"&gt;&lt;/div&gt;
+        &lt;script&gt;
+          const log = document.getElementById('log');
+          let tick = 0;
+
+          function addEntry(msg, ok) {
+            const line = document.createElement('div');
+            line.className = ok ? 'ok' : 'err';
+            line.textContent = `[${new Date().toISOString()}] ${msg}`;
+            log.prepend(line);
+            while (log.children.length &gt; 50) log.removeChild(log.lastChild);
+          }
+
+          async function poll() {
+            tick++;
+            try {
+              const r = await fetch('/');
+              addEntry(`GET / → ${r.status}`, r.ok);
+            } catch (e) {
+              addEntry(`GET / → network error: ${e.message}`, false);
+            }
+            if (tick % 3 === 0) {
+              try {
+                const r = await fetch('/missing');
+                addEntry(`GET /missing → ${r.status}`, r.ok);
+              } catch (e) {
+                addEntry(`GET /missing → network error: ${e.message}`, false);
+              }
+            }
+          }
+
+          poll();
+          setInterval(poll, 5000);
+        &lt;/script&gt;
+    &lt;/body&gt;
+    &lt;/html&gt;
+
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+
+        location / {
+            root   /usr/share/nginx/html;
+            index  index.html;
+        }
+
+        location /nginx_status {
+            stub_status on;
+            allow 127.0.0.1;
+            allow 10.0.0.0/8;
+            deny all;
+        }
+
+        location = /favicon.ico {
+            return 204;
+            access_log off;
+            log_not_found off;
+        }
+    }
+</code></pre>
+  <h3>prometheus/prometheus-config.yaml</h3>
+  <pre><code>
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: observability
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    
+    alerting:
+      alertmanagers:
+         - static_configs:
+            - targets: ['alertmanager:9093']
+
+    rule_files:
+      - /etc/prometheus/alert-rules.yaml
+
+    scrape_configs:
+
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: 'jenkins'
+        metrics_path: /prometheus
+        static_configs:
+          - targets: ['jenkins:8080']
+
+      - job_name: 'loki'
+        static_configs:
+          - targets: ['loki:3100']
+
+      - job_name: 'alloy'
+        static_configs:
+          - targets: ['alloy:12345']
+
+      - job_name: 'demo-app'
+        static_configs:
+          - targets: ['demo-app:9113']
+
+</code></pre>
+  <h3>prometheus/prometheus-alert-rules.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+  namespace: observability
+data:
+  alert-rules.yaml: |
+    groups:
+      - name: lab-infrastructure
+        rules:
+
+          # Any scrape target has gone down
+          - alert: TargetDown
+            expr: up == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Scrape target {{ $labels.job }} is down"
+              description: "Prometheus cannot reach {{ $labels.job }} at {{ $labels.instance }}"
+
+          # Jenkins disappeared entirely from scrape targets
+          - alert: JenkinsMissing
+            expr: absent(up{job="jenkins"})
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Jenkins is not present in scrape targets"
+              description: "No Jenkins instance is reachable — pipeline jobs cannot run"
+
+          # Loki disappeared — logs are being lost
+          - alert: LokiMissing
+            expr: absent(up{job="loki"})
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Loki is not reachable"
+              description: "Log ingestion may be failing — check Alloy pipeline"
+
+          # Alloy disappeared — logs are not being shipped
+          - alert: AlloyMissing
+            expr: absent(up{job="alloy"})
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Alloy log shipper is not reachable"
+              description: "Container logs may not be reaching Loki"
+
+          # Demo app disappeared
+          - alert: DemoAppDown
+            expr: absent(up{job="demo-app"})
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Demo app is not reachable"
+              description: "The demo-app nginx service has disappeared from scrape targets"
+
+          # Prometheus rule evaluation slow
+          - alert: PrometheusSlowRuleEvaluation
+            expr: prometheus_rule_evaluation_duration_seconds{quantile="0.9"} &gt; 5
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus rule evaluation is slow"
+              description: "90th percentile rule evaluation is over 5s — check rule complexity"
+</code></pre>
+  <h3>prometheus/prometheus-deployment.yaml</h3>
+  <pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: localhost:32000/prometheus:lab
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            # ADDED THE LINE BELOW TO ENABLE THE RECEIVER
+            - "--web.enable-remote-write-receiver"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+            - name: alert-rules
+              mountPath: /etc/prometheus/alert-rules.yaml
+              subPath: alert-rules.yaml
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: alert-rules
+          configMap:
+            name: prometheus-alert-rules
+</code></pre>
+  <h3>prometheus/prometheus-service.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+      nodePort: 30334
+  type: NodePort
+
+</code></pre>
+  <h3>grafana/grafana-deployment.yaml</h3>
+  <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: localhost:32000/grafana:lab
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+          volumeMounts:
+            - name: grafana-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+      volumes:
+        - name: grafana-datasources
+          configMap:
+            name: grafana-datasources
+</code></pre>
+  <h3>grafana/grafana-service.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  type: NodePort
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30300   # optional (must be within 30000–32767)
+</code></pre>
+  <h3>grafana/grafana-datasources-configmap.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: observability
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name:      Prometheus
+        type:      prometheus
+        uid:       prometheus
+        url:       http://prometheus:9090
+        access:    proxy
+        isDefault: true
+        editable:  true
+
+      - name:    Loki
+        type:    loki
+        uid:     loki
+        url:     http://loki:3100
+        access:  proxy
+        editable: true
+
+</code></pre>
+  <h3>logging/loki-config.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: observability
+data:
+  loki.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+
+    common:
+      instance_addr: 127.0.0.1
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory:  /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+
+    query_range:
+      results_cache:
+        cache:
+          embedded_cache:
+            enabled: true
+            max_size_mb: 100
+
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store:        tsdb
+          object_store: filesystem
+          schema:       v13
+          index:
+            prefix: index_
+            period: 24h
+
+    ruler:
+      alertmanager_url: http://alertmanager:9093
+
+    limits_config:
+      reject_old_samples:         true
+      reject_old_samples_max_age: 168h
+      allow_structured_metadata:  false
+</code></pre>
+  <h3>logging/loki-deployment.yaml</h3>
+  <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      containers:
+        - name: loki
+          image: localhost:32000/loki:lab
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/loki/loki.yaml
+          ports:
+            - name: http
+              containerPort: 3100
+            - name: grpc
+              containerPort: 9096
+          volumeMounts:
+            - name: loki-config
+              mountPath: /etc/loki
+            - name: loki-data
+              mountPath: /loki
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3100
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: loki-config
+          configMap:
+            name: loki-config
+        - name: loki-data
+          emptyDir: {}
+          # emptyDir is fine for the lab — logs reset on pod restart.
+          # For persistence, replace with a PVC using hostpath-storage.
+</code></pre>
+  <h3>logging/loki-service.yaml</h3>
+  <pre><code>apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: observability
+spec:
+  selector:
+    app: loki
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100
+  type: ClusterIP
+</code></pre>
+  <h3>logging/alloy-config.yaml</h3>
+  <pre><code>
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: observability
+data:
+  config.alloy: |
+    // ── LOG COLLECTION (Loki) ────────────────────────────────────────────────
+    // Tails the actual log files on the node disk
+    local.file_match "containers" {
+      path_targets = [{
+        __path__ = "/var/log/containers/*.log",
+      }]
+      sync_period = "10s"
+    }
+
+    loki.source.file "container_logs" {
+      targets    = local.file_match.containers.targets
+      forward_to = [loki.process.add_labels.receiver]
+    }
+
+    loki.process "add_labels" {
+      stage.regex {
+        expression = "/var/log/containers/(?P&lt;pod&gt;[^_]+)_(?P&lt;namespace&gt;[^_]+)_(?P&lt;container&gt;.+)-[0-9a-f]{64}[.]log"
+        source     = "filename"
+      }
+      stage.labels {
+        values = {
+          pod       = "pod",
+          namespace = "namespace",
+          container = "container",
+        }
+      }
+      forward_to = [loki.write.loki_endpoint.receiver]
+    }
+
+    loki.write "loki_endpoint" {
+      endpoint {
+        url = "http://loki:3100/loki/api/v1/push"
+      }
+    }
+
+    // ── METRICS COLLECTION (Prometheus via cAdvisor) ─────────────────────────
+    // This talks to the Kubelet to get CPU/RAM without needing extra exporters
+    
+    discovery.kubernetes "nodes" {
+      role = "node"
+    }
+
+    prometheus.scrape "cadvisor" {
+      targets = discovery.kubernetes.nodes.targets
+      
+      metrics_path = "/metrics/cadvisor"
+      scheme       = "https"
+
+      authorization {
+        type             = "Bearer"
+        credentials_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      }
+
+      tls_config {
+        ca_file              = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+        insecure_skip_verify = true
+      }
+
+      forward_to = [prometheus.remote_write.prom_endpoint.receiver]
+    }
+
+    // ── SINGLE PUSH ENDPOINT ─────────────────────────────────────────────────
+    // Consolidated to avoid the "Duplicate Component" error
+
+    prometheus.remote_write "prom_endpoint" {
+      endpoint {
+        url = "http://prometheus:9090/api/v1/write"
+      }
+    }
+
+</code></pre>
+  <h3>logging/alloy-rbac.yaml</h3>
+  <pre><code>
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy-metrics-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy-metrics-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: observability    
+  </code></pre>
+  <h3>logging/alloy-sa.yaml</h3>
+  <pre><code>
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: observability
+  </code></pre>
+  <h3>logging/alloy-service.yaml</h3>
+  <pre><code>
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy
+  namespace: observability
+spec:
+  selector:
+    app: alloy
+  ports:
+    - name: http-metrics
+      port: 12345
+      targetPort: 12345
+  type: ClusterIP
+  </code></pre>
+  <h3>logging/alloy-daemonset.yaml</h3>
+  <pre><code>apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  namespace: observability
+spec:
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
+    spec:
+      serviceAccountName: alloy
+      tolerations:
+        # Ensure Alloy runs on control-plane nodes too (needed for MicroK8s single-node)
+        - key:    node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      containers:
+        - name: alloy
+          image: localhost:32000/alloy:lab
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy/data
+            - --server.http.listen-addr=0.0.0.0:12345
+          ports:
+            - name: http-metrics
+              containerPort: 12345
+          volumeMounts:
+            - name: alloy-config
+              mountPath: /etc/alloy
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: alloy-data
+              mountPath: /var/lib/alloy/data
+      volumes:
+        - name: alloy-config
+          configMap:
+            name: alloy-config
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: alloy-data
+          emptyDir: {}
+</code></pre>
+  <h3>chaos/chaos-pods.yaml</h3>
+  <pre><code># Apply this file to intentionally trigger alerts.
+# kubectl apply -f chaos/chaos-pods.yaml -n observability
+# kubectl delete -f chaos/chaos-pods.yaml -n observability   &lt;-- cleanup
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-app-load-gen
+  namespace: observability
+  labels:
+    app: demo-app
+    job: demo-app
+spec:
+  containers:
+    - name: load-gen
+      image: localhost:32000/busybox:lab
+      # This loop now runs forever without exiting
+      command: ["sh", "-c", "while true; do wget -q -O- http://demo-app:80/ &gt; /dev/null; wget -q -O- http://demo-app:80/this-path-does-not-exist &gt; /dev/null; sleep 0.1; done"]
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jenkins-chaos-impersonator
+  namespace: observability
+  labels:
+    app: jenkins
+    job: jenkins
+spec:
+  containers:
+    - name: cpu-burner
+      image: localhost:32000/busybox:lab
+      # Removed 'exit 1'. This will keep the CPU 'mountain' flat at the top
+      command: ["sh", "-c", "echo 'Jenkins Constant Stress Start'; yes &gt; /dev/null &amp; yes &gt; /dev/null &amp; yes &gt; /dev/null &amp; while true; do sleep 30; done"]
+    
+</code></pre>
+</details>
+<h2>Build, Configure and Run</h2>
+<details>
+  <summary>5️⃣ Apply Kubernetes Manifests</summary>
+  <pre><code># 1. Namespace first
+sudo microk8s kubectl apply -f k8s/namespace.yaml
+
+# 2. Storage + RBAC
 sudo microk8s kubectl apply -f k8s/jenkins-sa.yaml
 sudo microk8s kubectl apply -f k8s/jenkins-rbac.yaml
 sudo microk8s kubectl apply -f k8s/jenkins-pvc.yaml
 sudo microk8s kubectl apply -f k8s/jenkins-ca-configmap.yaml
 
-# Loki before Alloy: Alloy needs somewhere to push
+# 3. Logging stack (Loki before Alloy — Alloy needs somewhere to push)
 sudo microk8s kubectl apply -f logging/loki-config.yaml
 sudo microk8s kubectl apply -f logging/loki-deployment.yaml
 sudo microk8s kubectl apply -f logging/loki-service.yaml
@@ -59,56 +1039,847 @@ sudo microk8s kubectl apply -f logging/alloy-service.yaml
 sudo microk8s kubectl apply -f logging/alloy-config.yaml
 sudo microk8s kubectl apply -f logging/alloy-daemonset.yaml
 
+# 4. Observability
 sudo microk8s kubectl apply -f prometheus/
 sudo microk8s kubectl apply -f grafana/
+
+# 5. App + CI
 sudo microk8s kubectl apply -f demo-app/
 sudo microk8s kubectl apply -f k8s/jenkins-deployment.yaml
 sudo microk8s kubectl apply -f k8s/jenkins-service.yaml
 
-# optional, when ready to trigger alerts:
-# sudo microk8s kubectl apply -f chaos/chaos-pods.yaml</code></pre></details><details><summary>5. Verify</summary><pre><code>sudo microk8s kubectl get pods -n observability
-sudo microk8s kubectl logs deploy/loki -n observability | grep &quot;started&quot;
-sudo microk8s kubectl logs daemonset/alloy -n observability | grep &quot;loki&quot;
-sudo microk8s kubectl logs deploy/demo-app -n observability -f</code></pre><pre><code>Open on your computer:
-  Demo app    http://127.0.0.1:30080/
-  Prometheus  http://127.0.0.1:30334   (all targets should be UP)
-  Grafana     http://127.0.0.1:30300/  (admin / admin)
+# 6. Chaos (optional — when ready to trigger alerts)
+# sudo microk8s kubectl apply -f chaos/chaos-pods.yaml
+# Turn the chaos pod off.
+## sudo microk8s kubectl delete -f chaos/chaos-pods.yaml
 
-Grafana -&gt; Explore -&gt; Loki (one query per pod):
-  count_over_time({namespace=&quot;observability&quot;, pod=~&quot;demo-app-.*&quot;} |= &quot; 200 &quot;[1m])
-  count_over_time({namespace=&quot;observability&quot;, pod=~&quot;demo-app-.*&quot;} |= &quot; 404 &quot;[1m])</code></pre><p>Dashboard: Grafana &rarr; Dashboards &rarr; Import &rarr; Upload JSON (use the dashboard JSON file from the lab repo).</p></details><details><summary>6. Jenkins</summary><pre><code>sudo microk8s kubectl get svc jenkins -n observability
-# NAT: open http://127.0.0.1:32043 on your computer (bridged: http://&lt;VM_IP&gt;:32043)
+### VERIFY ###
 
+# All pods running
 sudo microk8s kubectl get pods -n observability
+
+# Loki healthy
+sudo microk8s kubectl logs deploy/loki -n observability | grep "started"
+
+# Alloy shipping logs
+sudo microk8s kubectl logs daemonset/alloy -n observability | grep "loki"
+
+# Prometheus targets — all should be UP
+# Open: http://127.0.0.1:30334
+
+# Demo app calling itself (watch nginx access logs)
+sudo microk8s kubectl logs deploy/demo-app -n observability -f
+
+# Demo App:
+http://127.0.0.1:30080/
+
+# Prometheus:
+http://127.0.0.1:30334
+
+# Grafana (admin/admin)
+http://127.0.0.1:30300/
+
+sudo microk8s kubectl -n observability get pods
+In Grafana: explore -&gt; Loki add the following Code Query:(add for each pod)
+count_over_time({namespace="observability", pod=~"demo-app-.*"} |= " 200 "[1m])
+
+count_over_time({namespace="observability", pod=~"demo-app-.*"} |= " 404 "[1m])
+
+  </code></pre>
+  <h3>Grafana Dashboard Import</h3>
+  <p>Import via Grafana → Dashboards → Import → Upload JSON</p>
+  <pre><code>
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations &amp; Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(count_over_time({namespace=\"observability\", pod=~\"demo-app-.*\"} |= \"200\" [$__interval]))",
+          "legendFormat": "200 OK",
+          "refId": "A"
+        }
+      ],
+      "title": "Demo App 200 Logs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "orange",
+            "mode": "fixed"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(count_over_time({namespace=\"observability\", pod=~\"demo-app-.*\"} |= \"404\" [$__interval]))",
+          "legendFormat": "404 Not Found",
+          "refId": "B"
+        }
+      ],
+      "title": "Demo App 404 Logs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "up",
+          "legendFormat": "{{job}} - {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Prometheus Scrape Targets Up",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.1",
+      "targets": [
+        {
+          "expr": "up{job=~\"jenkins.*\"}",
+          "legendFormat": "Jenkins",
+          "refId": "D"
+        },
+        {
+          "expr": "up{job=~\"loki.*\"}",
+          "legendFormat": "Loki",
+          "refId": "E"
+        },
+        {
+          "expr": "up{job=~\"prometheus.*\"}",
+          "legendFormat": "Prometheus",
+          "refId": "F"
+        }
+      ],
+      "title": "Service Up Status (Stacked)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"observability\", pod=~\"demo-app-.*|jenkins-.*\"}[5m])) by (pod)",
+          "legendFormat": "{{pod}}",
+          "refId": "H"
+        }
+      ],
+      "title": "CPU Usage: Jenkins vs Demo-App",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "red",
+            "mode": "fixed"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(count_over_time({job=~\"jenkins.*|jenkins-pipeline\"} |~ \"(?i)error|fail\" [$__interval])) or vector(0)",
+          "legendFormat": "Pipeline Failure Events",
+          "refId": "G"
+        }
+      ],
+      "title": "Jenkins Error Logs (Live Spikes)",
+      "type": "timeseries"
+    }
+  ],
+  "preload": false,
+  "refresh": "5s",
+  "schemaVersion": 42,
+  "tags": [
+    "observability"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "Prometheus",
+          "value": "prometheus"
+        },
+        "name": "prom",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "text": "Loki",
+          "value": "loki"
+        },
+        "name": "loki",
+        "options": [],
+        "query": "loki",
+        "refresh": 1,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "DevSecOps Observability Lab (Final)2",
+  "uid": "adf58rk",
+  "version": 16,
+  "weekStart": ""
+}
+</code></pre>
+  <pre><code>
+
+</code></pre>
+</details>
+<details>
+  <summary>6️⃣ Build Jenkins</summary>
+  <pre><code>########################################
+# 1️⃣ Find the NodePort for Jenkins
+########################################
+sudo microk8s kubectl get svc jenkins -n observability
+# Example output:
+# NAME      TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)          AGE
+# jenkins   NodePort   10.152.183.45           8080:32043/TCP  2m
+
+########################################
+# 2️⃣ Access Jenkins GUI from your host browser
+########################################
+# Replace  and  with values from the previous command
+# http://127.0.0.1:32043
+
+########################################
+# 3️⃣ Get the initial admin password
+########################################
+sudo microk8s kubectl get pods -n observability
+
 sudo microk8s kubectl exec -it deploy/jenkins -n observability -- cat /var/jenkins_home/secrets/initialAdminPassword
-# Username: admin   Password: &lt;the value printed above&gt;
+# Use the following to login:
+# Username: admin
+# Password: 
 
-# Check the volume is Bound (keeps jobs and passwords across restarts)
-sudo microk8s kubectl get pvc -n observability</code></pre><p>On first run Jenkins may say it appears to be offline: click <b>Skip plugin installations</b> (the plugins are already installed).</p><pre><code># Jenkins will not load?
-sudo startJenkinsLabDHCPcerts      # bridged networks: the VM&#x27;s IP changed
-# Last resort:
+########################################
+# ⚠️ Important Notes About Persistence
+########################################
+# 1. If you have a properly bound PVC (jenkins-pvc) mounted at /var/jenkins_home:
+#    - Restarting the Jenkins Pod does NOT change the admin password
+#    - All jobs, plugins, and credentials are preserved
+# 2. If you see password reset or lost jobs:
+#    - Check the PVC status:
+microk8s kubectl get pvc -n observability
+#    - Make sure it shows STATUS: Bound
+# 3. Safe way to restart Jenkins:
+#    - Restart via the GUI instead of deleting the Pod manually
+
+########################################
+# 4️⃣ IF JENKINS WON’T LOAD ON HOST BROWSERS OR Validate Errors (when getting admin passwords)
+########################################
+# If DHCP IP address has change, re-run the startup script:
+sudo startJenkinsLabDHCPcerts
+
+# Worst Case try: (make sure your browser isn't cache)
+sudo microk8s refresh-certs --cert front-proxy-client
 sudo microk8s refresh-certs --cert server.crt
+sudo microk8s refresh-certs --cert ca.crt
+sudo microk8s refresh-certs
+
 sudo microk8s stop
-sudo microk8s start</code></pre></details><details><summary>7. Jenkins settings and pipeline</summary><pre><code>Manage Jenkins -&gt; Plugins -&gt; Installed plugins:  Kubernetes, Git, GitHub (already installed)
-
-Manage Jenkins -&gt; System
-  Jenkins URL: http://jenkins.observability.svc.cluster.local:8080/
-
-Manage Jenkins -&gt; Clouds -&gt; New cloud -&gt; Kubernetes
-  Name:                  KubernetesCloud
-  Kubernetes URL:        https://kubernetes.default.svc
-  Jenkins URL:           http://jenkins.observability.svc.cluster.local:8080
-  Disable https certificate check: tick
-  Pod template:          pipelinepod
-    Container:           jnlp
-    Docker image:        localhost:32000/jenkins-inbound-agent:lab
-    Working directory:   /home/jenkins/agent
-    Pod service account: jenkins
-
-New Item -&gt; jenkins-pipeline -&gt; Pipeline
-  Definition: Pipeline script from SCM   SCM: Git
-  Repository URL: https://github.com/&lt;username&gt;/cse2001lab7
-  Branch: */main   Script Path: Jenkinsfile   [x] Lightweight checkout
-  Save, then Build Now</code></pre></details><details><summary>8. End of lab</summary><pre><code>sudo microk8s kubectl delete -f chaos/chaos-pods.yaml
-sudo microk8s kubectl delete namespace observability</code></pre></details></main><script>document.querySelectorAll('pre').forEach(function(p){var b=document.createElement('button');b.textContent='Copy';b.onclick=function(){navigator.clipboard.writeText(p.innerText.replace(/Copy$/,'').trimEnd());b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)};p.appendChild(b)});
-function all(o){document.querySelectorAll('details').forEach(function(d){d.open=o})}</script></body></html>
+sudo microk8s start
+# Then retry the browser access: http://:
+</code></pre>
+</details>
+<details>
+  <summary>7️⃣ Jenkins GUI and Pipeline</summary>
+  <h3>1️⃣ Install Required Plugins</h3>
+  <ul>
+    <li>Go to <strong>Manage Jenkins → Manage Plugins → Available</strong></li>
+    <li>Install the following plugins:
+      <ul>
+        <li>Kubernetes</li>
+        <li>Git</li>
+        <li>GitHub</li>
+      </ul>
+    </li>
+    <li>Restart Jenkins if prompted.</li>
+  </ul>
+  <h3>2️⃣ Configure Jenkins System</h3>
+  <ul>
+    <li>Navigate to <strong>Manage Jenkins → Configure System</strong></li>
+    <li>Set the <strong>Jenkins URL</strong> to:
+      <code>http://jenkins.observability.svc.cluster.local:8080/</code></li>
+  </ul>
+  <h3>3️⃣ Add Kubernetes Cloud</h3>
+  <ul>
+    <li>In <strong>Manage Jenkins → Configure System → Clouds → Add a new cloud
+        → Kubernetes</strong>:
+      <ul>
+        <li><strong>Name:</strong> KubernetesCloud</li>
+        <li><strong>Kubernetes URL:</strong> https://kubernetes.default.svc</li>
+        <li><strong>Jenkins URL:</strong>
+          http://jenkins.observability.svc.cluster.local:8080</li>
+        <li>Disable https certificate check: ✓ (tick)</li>
+      </ul>
+    </li>
+    <li>Configure <strong>Pod Template</strong>:
+      <ul>
+        <li><strong>Name:</strong> pipelinepod</li>
+        <li><strong>Usage:</strong> Only build jobs with label expressions
+          matching this node</li>
+        <li>Container Template:
+          <ul>
+            <li><strong>Name:</strong> jnlp</li>
+            <li><strong>Docker Image:</strong>
+              localhost:32000/jenkins-inbound-agent:lab</li>
+            <li><strong>Working Directory:</strong> /home/jenkins/agent</li>
+            <li>Leave <strong>Command</strong> and <strong>Arguments</strong>
+              empty</li>
+            <li><strong>Pod Service Account:</strong> jenkins</li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+  <h3>4️⃣ Create a Jenkins Pipeline</h3>
+  <ul>
+    <li>Go to <strong>New Item</strong></li>
+    <li>Enter a name (e.g., <strong>jenkins-pipeline</strong>)</li>
+    <li>Select <strong>Pipeline</strong> and click <strong>OK</strong></li>
+    <li>Pipeline Definition:
+      <ul>
+        <li><strong>Definition:</strong> Pipeline script from SCM</li>
+        <li><strong>SCM:</strong> Git</li>
+        <li><strong>Repository URL:</strong>
+          <code>https://github.com/&lt;username&gt;/cse2001lab7</code></li>
+        <li><strong>Branch Specifier:</strong> <code>*/main</code></li>
+        <li><strong>Script Path:</strong> Jenkinsfile</li>
+        <li>Check <strong>Lightweight checkout</strong></li>
+      </ul>
+    </li>
+    <li>Click <strong>Save</strong> then <strong>Build Now</strong>.</li>
+  </ul>
+</details>
+<pre><code> </code></pre>
+<pre><code>
+Clean up (do this at the very end):       
+      sudo microk8s kubectl delete -f chaos/chaos-pods.yaml
+      sudo microk8s kubectl delete namespace observability
+Removes Jenkins namespace. Free up memory for the next lab.
+</code></pre>
+</body>
+</html>
